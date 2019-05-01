@@ -21,7 +21,7 @@ app.get('/', function(request, response) {
 server.listen(process.env.PORT || port, function() {
 	if (!process.env.PORT) {
 		app.set('port', port);
-		console.log('Game started on port ' + port + '\n');
+		//console.log('Game started on port ' + port + '\n');
 	}
 });
 
@@ -41,19 +41,66 @@ io.on('connection', function(socket) {
 
 			if(!game.ended) {
 				if(new Date(time) - game.startTime >= game.goTime) {
-					io.to(socket.id).emit('result', true);
-					io.to(users[socket.id].opponent).emit('result', false);
-					game.ended = true;
+					if(game.earlyTime != null) {
+						io.to(socket.id).emit('result', true);
+						io.to(users[socket.id].opponent).emit('result', false);
+						game.ended = true;
+					} else if(game.fastTime != null && new Date(time) - game.fastTime < 0) {
+						io.to(socket.id).emit('result', true);
+						io.to(users[socket.id].opponent).emit('result', false);
+						game.ended = true;
+					} else if(game.fastTime == null) {
+						game.fastTime = new Date(time);
+						game.fastPlayer = socket.id;
+					} else {
+						io.to(socket.id).emit('result', false);
+						io.to(users[socket.id].opponent).emit('result', true);
+						game.ended = true;
+					}
 				} else {
-					io.to(socket.id).emit('result', false);
-					io.to(users[socket.id].opponent).emit('result', true);
-					game.ended = true;
+					if(game.fastTime != null) {
+						io.to(socket.id).emit('result', false);
+						io.to(users[socket.id].opponent).emit('result', true);
+						game.ended = true;
+					} else if(game.earlyTime != null && new Date(time) - game.earlyTime > 0) {
+						io.to(socket.id).emit('result', true);
+						io.to(users[socket.id].opponent).emit('result', false);
+						game.ended = true;
+					} else if(game.earlyTime == null) {
+						game.earlyTime = new Date(time);
+						game.earlyPlayer = socket.id;
+					} else {
+						io.to(socket.id).emit('result', false);
+						io.to(users[socket.id].opponent).emit('result', true);
+						game.ended = true;
+					}
 				}
 			}
 		} catch(e) {
-			console.log(e);
+			//console.log(e);
 		}
 	});
+	socket.on('end', function() {
+		try {
+			var user = users[socket.id];
+			var opp = users[users[socket.id].opponent];
+
+			if(user.inGame != null) {
+				delete games[user.inGame];
+			}
+
+			user.inGame = null;
+			opp.inGame = null;
+
+			user.opponent = null;
+			opp.opponent = null;
+
+			findMatch(user);
+			findMatch(opp);
+		} catch (e) {
+			//console.log(e);
+		}
+   	});
 	socket.on('disconnect', function() {
 		if (users[socket.id]) {
 			if (users[socket.id].inGame == null) {
@@ -84,8 +131,12 @@ function findMatch(socket) {
     		id: gameid,
     		startTime: new Date(),
     		goTime: 2000+Math.floor(Math.random() * 5000),
-    		ended: false,
-    		players: {}
+    		players: {},
+    		fastTime: null,
+    		fastPlayer: null,
+    		earlyTime: null,
+    		earlyPlayer: null,
+    		ended: false
     	};
 
     	games[gameid].players[firstInLine] = {
@@ -114,9 +165,21 @@ setInterval(function() {
 	try {
 		for (var i in games) {
 			game = games[i];
+
+			if(!game.ended) {
+				if(game.fastTime != null && new Date() - game.fastTime > 250) {
+					io.to(game.fastPlayer).emit('result', true);
+					io.to(users[game.fastPlayer].opponent).emit('result', false);
+					game.ended = true;
+				} else if(game.earlyTime != null && new Date() - game.earlyTime > 250) {
+					io.to(game.earlyPlayer).emit('result', false);
+					io.to(users[game.earlyPlayer].opponent).emit('result', true);
+					game.ended = true;
+				}
+			}
 		}
 	} catch (e) {
-		console.log(e);
+		//console.log(e);
 	}
 
 }, 1000 / gameSpeed);
